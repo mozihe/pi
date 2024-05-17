@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Detection</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .gauge {
+            width: 150px;
+            height: 150px;
+            margin: auto;
+        }
+        .gauge-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        .gauge-title {
+            text-align: center;
+            margin-top: 10px;
+        }
+        .temp-container {
+            margin-top: 30px;
+        }
+        .hidden {
+            display: none;
+        }
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center my-4">YOLO Detection</h1>
+        <div class="row mb-4">
+            <div class="col-md-4 offset-md-2">
+                <select id="modelSelect" class="form-control">
+                    <!-- 动态填充模型选项 -->
+                </select>
+            </div>
+            <div class="col-md-4">
+                <select id="labelSelect" class="form-control">
+                    <!-- 动态填充标签选项 -->
+                </select>
+            </div>
+        </div>
+        <div class="row mb-4">
+            <div class="col-md-4 offset-md-4 text-center">
+                <button id="toggleViewBtn" class="btn btn-primary">Switch to Data View</button>
+            </div>
+        </div>
+        <div id="detectionView">
+            <div class="row">
+                <div class="col-md-8 offset-md-2">
+                    <div class="card">
+                        <div class="card-body">
+                            <img id="video-feed" src="{{ url_for('video_feed') }}" class="img-fluid">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <h2 class="text-center my-4">System Information</h2>
+            <div class="row text-center">
+                <div class="col-md-3 temp-container">
+                    <div class="gauge-container">
+                        <canvas id="temperatureGauge" class="gauge"></canvas>
+                    </div>
+                    <div class="gauge-title">Temperature</div>
+                </div>
+                <div class="col-md-3">
+                    <div class="gauge-container">
+                        <canvas id="memoryGauge" class="gauge"></canvas>
+                    </div>
+                    <div class="gauge-title">Memory Usage</div>
+                </div>
+                <div class="col-md-3">
+                    <div class="gauge-container">
+                        <canvas id="cpuGauge" class="gauge"></canvas>
+                    </div>
+                    <div class="gauge-title">CPU Usage</div>
+                </div>
+                <div class="col-md-3">
+                    <div class="gauge-container">
+                        <canvas id="diskGauge" class="gauge"></canvas>
+                    </div>
+                    <div class="gauge-title">Disk Usage</div>
+                </div>
+            </div>
+        </div>
+        <div id="dataView" class="hidden">
+            <h2 class="text-center my-4">Detection Statistics</h2>
+            <div class="row">
+                <div class="col-md-6">
+                    <canvas id="detectionCountChart"></canvas>
+                </div>
+                <div class="col-md-6">
+                    <canvas id="averageDurationChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', (event) => {
+            fetchModels();
+            fetchLabels();
+
+            document.getElementById('modelSelect').addEventListener('change', function() {
+                const selectedModel = this.value;
+                fetch(`/change_model?model=${selectedModel}`)
+                    .then(response => response.json())
+                    .then(data => console.log(data.message));
+            });
+
+            document.getElementById('labelSelect').addEventListener('change', function() {
+                const selectedLabel = this.value;
+                fetch(`/change_label?label=${selectedLabel}`)
+                    .then(response => response.json())
+                    .then(data => console.log(data.message));
+            });
+
+            setInterval(fetchSystemInfo, 5000);  // 每5秒更新一次系统信息
+            fetchSystemInfo();  // 页面加载时立即获取一次系统信息
+
+            let currentPage = 1;
+            const rowsPerPage = 10;
+
+            document.getElementById('toggleViewBtn').addEventListener('click', function() {
+                const detectionView = document.getElementById('detectionView');
+                const dataView = document.getElementById('dataView');
+                if (dataView.classList.contains('hidden')) {
+                    dataView.classList.remove('hidden');
+                    detectionView.classList.add('hidden');
+                    this.textContent = 'Switch to Detection View';
+                    fetchDetectionStats();
+                } else {
+                    dataView.classList.add('hidden');
+                    detectionView.classList.remove('hidden');
+                    this.textContent = 'Switch to Data View';
+                }
+            });
+
+            async function fetchModels() {
+                const response = await fetch('/models');
+                const models = await response.json();
+                const modelSelect = document.getElementById('modelSelect');
+                modelSelect.innerHTML = '';  // 清空现有选项
+                models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model;
+                    option.text = model;
+                    modelSelect.appendChild(option);
+                });
+            }
+
+            async function fetchLabels() {
+                const response = await fetch('/labels');
+                const labels = await response.json();
+                const labelSelect = document.getElementById('labelSelect');
+                labelSelect.innerHTML = '';  // 清空现有选项
+                labels.forEach(label => {
+                    const option = document.createElement('option');
+                    option.value = label;
+                    option.text = label;
+                    labelSelect.appendChild(option);
+                });
+            }
+
+            const temperatureGauge = new Chart(document.getElementById('temperatureGauge'), {
+                type: 'bar',
+                data: {
+                    labels: ['Temperature'],
+                    datasets: [{
+                        data: [0],
+                        backgroundColor: ['#ff0000'],
+                        borderColor: ['#ff0000'],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false },
+                        title: {
+                            display: true,
+                            text: 'Temperature (°C)'
+                        }
+                    }
+                }
+            });
+
+            const memoryGauge = new Chart(document.getElementById('memoryGauge'), {
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: [0, 100],
+                        backgroundColor: ['#00ff00', '#eeeeee']
+                    }]
+                },
+                options: {
+                    circumference: 180,
+                    rotation: -90,
+                    cutoutPercentage: 70,
+                    tooltips: {enabled: false},
+                    plugins: {
+                        legend: { display: false },
+                        doughnutlabel: {
+                            labels: [
+                                {
+                                    text: '0%',
+                                    font: {size: 20, weight: 'bold'}
+                                }
+                            ]
+                        }
+                    }
+                }
+            });
+
+            const cpuGauge = new Chart(document.getElementById('cpuGauge'), {
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: [0, 100],
+                        backgroundColor: ['#0000ff', '#eeeeee']
+                    }]
+                },
+                options: {
+                    circumference: 180,
+                    rotation: -90,
+                    cutoutPercentage: 70,
+                    tooltips: {enabled: false},
+                    plugins: {
+                        legend: { display: false },
+                        doughnutlabel: {
+                            labels: [
+                                {
+                                    text: '0%',
+                                    font: {size: 20, weight: 'bold'}
+                                }
+                            ]
+                        }
+                    }
+                }
+            });
+
+            const diskGauge = new Chart(document.getElementById('diskGauge'), {
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: [0, 100],
+                        backgroundColor: ['#ffa500', '#eeeeee']
+                    }]
+                },
+                options: {
+                    circumference: 180,
+                    rotation: -90,
+                    cutoutPercentage: 70,
+                    tooltips: {enabled: false},
+                    plugins: {
+                        legend: { display: false },
+                        doughnutlabel: {
+                            labels: [
+                                {
+                                    text: '0%',
+                                    font: {size: 20, weight: 'bold'}
+                                }
+                            ]
+                        }
+                    }
+                }
+            });
+
+            async function fetchSystemInfo() {
+                const response = await fetch('/system_info');
+                const data = await response.json();
+
+                updateGauge(temperatureGauge, data.temperature);
+                updateGauge(memoryGauge, data.memory);
+                updateGauge(cpuGauge, data.cpu);
+                updateGauge(diskGauge, data.disk);
+            }
+
+            function updateGauge(gauge, value) {
+                if (gauge === temperatureGauge) {
+                    gauge.data.datasets[0].data[0] = value !== 'N/A' ? value : 0;
+                    gauge.options.plugins.title.text = `Temperature: ${value !== 'N/A' ? value : 'N/A'} °C`;  // 更新标题显示温度值
+                    gauge.update();
+                } else {
+                    gauge.data.datasets[0].data[0] = value;
+                    gauge.data.datasets[0].data[1] = 100 - value;
+                    gauge.options.plugins.doughnutlabel.labels[0].text = `${value}%`;
+                    gauge.update();
+                }
+            }
+
+            async function fetchDetectionStats() {
+                const response = await fetch('/detection_stats');
+                const data = await response.json();
+                const labels = data.map(row => row[0]);
+                const counts = data.map(row => row[1]);
+                const avgDurations = data.map(row => row[2]);
+
+                const detectionCountChartCtx = document.getElementById('detectionCountChart').getContext('2d');
+                new Chart(detectionCountChartCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Detection Count',
+                            data: counts,
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+
+                const averageDurationChartCtx = document.getElementById('averageDurationChart').getContext('2d');
+                new Chart(averageDurationChartCtx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Average Duration (s)',
+                            data: avgDurations,
+                            backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                            borderColor: 'rgba(153, 102, 255, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    </script>
+
+    <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+</body>
+</html>
