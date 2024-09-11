@@ -4,7 +4,7 @@ import onnxruntime as ort
 from random import randint
 
 class YOLO:
-    def __init__(self, model_path, labels, model_h, model_w, strides, anchors, thred_nms=0.4, thred_cond=0.1):
+    def __init__(self, model_path, labels, model_h, model_w, strides, anchors, thred_nms=0.45, thred_cond=0.8):
         self.model_h = model_h
         self.model_w = model_w
         self.strides = strides

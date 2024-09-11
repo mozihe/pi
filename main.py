@@ -1,4 +1,4 @@
-import signal
+from time import sleep
 
 import cv2
 import time
@@ -16,8 +16,6 @@ from queue import Queue
 from sort import Sort
 from database import insert_new_tracking_record, update_tracking_record, init_db, check_if_track_exists
 from datetime import datetime
-from ImageController import ImageController
-import RPi.GPIO as GPIO
 
 # 设置日志记录
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
@@ -30,43 +28,28 @@ ADMIN_PASSWORD = 'password'
 
 init_db()
 
-# YOLO模型和摄像头参数
 model_folder = "models"
 label_folder = "labels"
-model_file_path = os.path.join(model_folder, "best_lite.onnx")
-label_file_path = os.path.join(label_folder, "zjh.json")
+model_file_path = os.path.join(model_folder, "best_lyl.onnx")
+label_file_path = os.path.join(label_folder, "lyl.json")
 yolo = None
-cap = ImageController()
+cap = None
 frame_queue = Queue(maxsize=1)
-tracker = Sort()  # 初始化Sort目标跟踪器
+tracker = Sort()
 
+time.sleep(1)
 
-def setup_gpio():
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(12, GPIO.OUT)
-    pwm = GPIO.PWM(12, 1000)  # PWM frequency 1000 Hz
-    pwm.start(0)
-    return pwm
-
-
-def breath_led(pwm):
-    try:
-        while True:
-            for duty_cycle in range(0, 101, 1):
-                pwm.ChangeDutyCycle(duty_cycle)
-                time.sleep(0.01)
-            for duty_cycle in range(100, -1, -1):
-                pwm.ChangeDutyCycle(duty_cycle)
-                time.sleep(0.01)
-    except KeyboardInterrupt:
-        pwm.stop()
-        GPIO.cleanup()
 
 def initialize_yolo_and_camera():
-    global yolo
+    global yolo, cap
     with open(label_file_path, 'r') as f:
         labels = json.load(f)
         labels = {int(k): v for k, v in labels.items()}  # 将字符串键转换为整数
+
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        logging.error("Cannot open camera")
+        exit(-1)
 
     model_h = 320
     model_w = 320
@@ -79,9 +62,11 @@ def initialize_yolo_and_camera():
 def yolo_inference():
     global tracker, cap, frame_queue
     while True:
-        success, img0 = cap.getImg()
+        success, img0 = cap.read()
+
         if not success:
             logging.error("Failed to read frame from camera")
+            sleep(0.01)
             continue
 
         t1 = time.time()
@@ -111,7 +96,7 @@ def yolo_inference():
             frame_queue.get()
         frame_queue.put(cv2.imencode('.jpg', img0)[1].tobytes())
 
-# 获取系统信息
+
 def get_system_info():
     def get_temperature():
         try:
@@ -261,21 +246,9 @@ def get_detection_stats():
     conn.close()
     return jsonify(stats)
 
-def signal_handler(sig, frame):
-    print('Exiting gracefully...')
-    pwm.stop()
-    GPIO.cleanup()
-    os._exit(0)
+initialize_yolo_and_camera()
 
 if __name__ == "__main__":
-    pwm = setup_gpio()
-    led_thread = threading.Thread(target=breath_led, args=(pwm,))
-    led_thread.start()
-    signal.signal(signal.SIGINT, signal_handler)
-    try:
-        initialize_yolo_and_camera()
-        threading.Thread(target=yolo_inference, daemon=True).start()
-        app.run(host='0.0.0.0', port=5000)
-    except KeyboardInterrupt:
-        pwm.stop()
-        GPIO.cleanup()
+    sleep(1)
+    threading.Thread(target=yolo_inference, daemon=True).start()
+    app.run(host='0.0.0.0', port=5000)
